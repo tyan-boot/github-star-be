@@ -53,10 +53,10 @@ struct RepoInfo {
     language: Option<String>,
 }
 
-#[get("/state")]
+#[post("/state")]
 fn new_state() -> Json<StateResp> {
     let uuid = Uuid::new_v4();
-    let uuid = base64::encode(uuid.as_bytes());
+    let uuid = base64::encode_config(uuid.as_bytes(), base64::URL_SAFE_NO_PAD);
 
     Json(StateResp { state: uuid })
 }
