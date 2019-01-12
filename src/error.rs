@@ -20,8 +20,8 @@ impl<'a> Responder<'a> for Message {
 }
 
 impl From<reqwest::Error> for Message {
-    fn from(_: reqwest::Error) -> Self {
-        println!("....");
+    fn from(err: reqwest::Error) -> Self {
+        println!("{:?}", err);
         Message {
             status: 0,
             message: "error when request".to_owned(),

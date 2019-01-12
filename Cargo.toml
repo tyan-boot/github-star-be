@@ -15,6 +15,9 @@ reqwest = "0.9.7"
 regex = "1.1.0"
 serde_json = "*"
 dotenv = "0.13"
+futures = "0.1.25"
+tokio-threadpool  = "0.1.10"
+
 
 [dependencies.rocket_contrib]
 version = "0.4.0"

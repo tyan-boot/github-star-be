@@ -11,12 +11,18 @@ use std::collections::HashMap;
 use std::env;
 
 use regex::{Captures, Regex};
+use reqwest::r#async::Client;
+
+use futures::future::join_all;
+use futures::Future;
 use reqwest::header::{HeaderValue, ACCEPT, AUTHORIZATION};
 use rocket::response::Redirect;
+use rocket::State;
 use rocket_contrib::{
     databases::redis::{self, Commands},
     json::Json,
 };
+use tokio_threadpool::{Builder as ThreadPoolBuilder, ThreadPool};
 use uuid::Uuid;
 
 mod error;
@@ -93,6 +99,7 @@ fn oauth_cb(code: String, state: String, conn: RedisDB) -> Result<Redirect, Mess
 fn analyze_stars(
     req: Json<AnalyzeRequest>,
     conn: RedisDB,
+    pool: State<ThreadPool>,
 ) -> Result<Json<HashMap<String, i32>>, Message> {
     let re = Regex::new("page=(\\d+)").unwrap();
 
@@ -108,33 +115,45 @@ fn analyze_stars(
 
     let token = token.unwrap();
 
-    let client = reqwest::Client::new();
+    let client = Client::builder()
+        .build()
+        .unwrap();
 
-    let mut resp = client
+    let resp = client
         .get("https://api.github.com/user/starred")
         .header(AUTHORIZATION, format!("token {}", token))
-        .send()?;
+        .send();
+
+    let mut resp = pool.spawn_handle(resp).wait()?;
 
     let link: Option<&HeaderValue> = resp.headers().get("Link");
     // todo : 处理这两个错误
     let captures: Vec<Captures> = re.captures_iter(link.unwrap().to_str().unwrap()).collect();
     let total_page: i32 = captures[1].get(1).unwrap().as_str().parse().unwrap();
 
-    let mut all_repos: Vec<RepoInfo> = resp.json()?;
+    let mut all_repos: Vec<RepoInfo> = resp.json().wait()?;
+
+    let mut fus = Vec::new();
 
     for i in 2..=total_page {
         println!("fetch page {}", i);
         let url = format!("https://api.github.com/user/starred?page={}", i);
 
-        let mut resp = client
+        let resp = client
             .get(&url)
             .header(AUTHORIZATION, format!("token {}", token))
-            .send()?;
+            .send();
 
-        let mut repos = resp.json()?;
-
-        all_repos.append(&mut repos);
+        fus.push(resp.and_then(|mut resp| resp.json::<Vec<RepoInfo>>()));
     }
+
+    let fu = join_all(fus);
+
+    let result: Vec<Vec<RepoInfo>> = pool.spawn_handle(fu).wait()?;
+
+    result.into_iter().for_each(|mut repos| {
+        all_repos.append(&mut repos);
+    });
 
     let mut analyze = HashMap::new();
 
@@ -160,7 +179,10 @@ fn analyze_stars(
 fn main() {
     dotenv::dotenv().ok();
 
+    let pool = ThreadPoolBuilder::new().pool_size(1).build();
+
     rocket::ignite()
+        .manage(pool)
         .attach(RedisDB::fairing())
         .mount("/api", routes![new_state, oauth_cb, analyze_stars])
         .launch();
