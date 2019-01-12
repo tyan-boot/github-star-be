@@ -11,12 +11,14 @@ uuid = { version = "0.7", features = ["v4"] }
 base64 = "0.10.0"
 serde = "^1.0"
 serde_derive = "*"
-reqwest = "0.9.7"
+reqwest = "0.9.8"
 regex = "1.1.0"
 serde_json = "*"
 dotenv = "0.13"
 futures = "0.1.25"
 tokio-threadpool  = "0.1.10"
+log = "0.4.6"
+env_logger = "0.6.0"
 
 
 [dependencies.rocket_contrib]

@@ -15,6 +15,7 @@ use reqwest::r#async::Client;
 
 use futures::future::join_all;
 use futures::Future;
+use log::debug;
 use reqwest::header::{HeaderValue, ACCEPT, AUTHORIZATION};
 use rocket::response::Redirect;
 use rocket::State;
@@ -115,9 +116,7 @@ fn analyze_stars(
 
     let token = token.unwrap();
 
-    let client = Client::builder()
-        .build()
-        .unwrap();
+    let client = Client::builder().build().unwrap();
 
     let resp = client
         .get("https://api.github.com/user/starred")
@@ -126,34 +125,37 @@ fn analyze_stars(
 
     let mut resp = pool.spawn_handle(resp).wait()?;
 
-    let link: Option<&HeaderValue> = resp.headers().get("Link");
-    // todo : 处理这两个错误
-    let captures: Vec<Captures> = re.captures_iter(link.unwrap().to_str().unwrap()).collect();
-    let total_page: i32 = captures[1].get(1).unwrap().as_str().parse().unwrap();
-
     let mut all_repos: Vec<RepoInfo> = resp.json().wait()?;
 
-    let mut fus = Vec::new();
+    let link: Option<&HeaderValue> = resp.headers().get("Link");
+    // more then one page
+    if let Some(link) = link {
+        let captures: Vec<Captures> = re.captures_iter(link.to_str().unwrap()).collect();
 
-    for i in 2..=total_page {
-        println!("fetch page {}", i);
-        let url = format!("https://api.github.com/user/starred?page={}", i);
+        let total_page: i32 = captures[1].get(1).unwrap().as_str().parse().unwrap();
 
-        let resp = client
-            .get(&url)
-            .header(AUTHORIZATION, format!("token {}", token))
-            .send();
+        let mut fus = Vec::new();
 
-        fus.push(resp.and_then(|mut resp| resp.json::<Vec<RepoInfo>>()));
+        for i in 2..=total_page {
+            debug!("fetch page {}", i);
+            let url = format!("https://api.github.com/user/starred?page={}", i);
+
+            let resp = client
+                .get(&url)
+                .header(AUTHORIZATION, format!("token {}", token))
+                .send();
+
+            fus.push(resp.and_then(|mut resp| resp.json::<Vec<RepoInfo>>()));
+        }
+
+        let fu = join_all(fus);
+
+        let result: Vec<Vec<RepoInfo>> = pool.spawn_handle(fu).wait()?;
+
+        result.into_iter().for_each(|mut repos| {
+            all_repos.append(&mut repos);
+        });
     }
-
-    let fu = join_all(fus);
-
-    let result: Vec<Vec<RepoInfo>> = pool.spawn_handle(fu).wait()?;
-
-    result.into_iter().for_each(|mut repos| {
-        all_repos.append(&mut repos);
-    });
 
     let mut analyze = HashMap::new();
 
@@ -178,6 +180,8 @@ fn analyze_stars(
 
 fn main() {
     dotenv::dotenv().ok();
+
+    env_logger::init();
 
     let pool = ThreadPoolBuilder::new().pool_size(1).build();
 

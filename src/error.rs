@@ -5,6 +5,7 @@ use rocket::response::Responder;
 use rocket::Request;
 use rocket::Response;
 
+use log::error;
 use serde_json::to_string;
 use std::io::Cursor;
 
@@ -21,7 +22,7 @@ impl<'a> Responder<'a> for Message {
 
 impl From<reqwest::Error> for Message {
     fn from(err: reqwest::Error) -> Self {
-        println!("{:?}", err);
+        error!("{:?}", err);
         Message {
             status: 0,
             message: "error when request".to_owned(),
@@ -31,7 +32,7 @@ impl From<reqwest::Error> for Message {
 
 impl From<redis::RedisError> for Message {
     fn from(err: redis::RedisError) -> Self {
-        println!("{:?}", err);
+        error!("{:?}", err);
 
         Message {
             status: 0,
